@@ -12,7 +12,7 @@ pub const Object = union (enum) {
         _ = options;
 
         switch (self) {
-            Self.Float => |v| try writer.print("{}", .{v}),
+            Self.Float => |v| try writer.print("{d}", .{v}),
             Self.Int => |v| try writer.print("{}", .{v}),
             Self.Str => |v| try writer.print("'{}'", .{v}),
         }

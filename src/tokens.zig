@@ -62,6 +62,11 @@ pub const TokenKind = enum {
     None,
     True,
     False,
+    In,
+    Return,
+    Lm,
+    Break,
+    Continue,
     Eof,
 };
 

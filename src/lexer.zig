@@ -274,6 +274,7 @@ pub const Lexer = struct {
         try keywords.put("if", TokenKind.If);
         try keywords.put("else", TokenKind.Else);
         try keywords.put("fn", TokenKind.Fn);
+        try keywords.put("lm", TokenKind.Lm);
         try keywords.put("for", TokenKind.For);
         try keywords.put("while", TokenKind.While);
         try keywords.put("let", TokenKind.Let);
@@ -283,6 +284,10 @@ pub const Lexer = struct {
         try keywords.put("true", TokenKind.True);
         try keywords.put("false", TokenKind.False);
         try keywords.put("none", TokenKind.None);
+        try keywords.put("in", TokenKind.In);
+        try keywords.put("break", TokenKind.Break);
+        try keywords.put("continue", TokenKind.Continue);
+        try keywords.put("return", TokenKind.Return);
         return keywords.get(value);
     }
 
