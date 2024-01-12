@@ -1,0 +1,4 @@
+*.txt
+*.lox
+zig-out
+zig-cache
