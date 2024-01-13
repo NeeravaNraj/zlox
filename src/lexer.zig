@@ -23,7 +23,7 @@ pub const Lexer = struct {
     };
 
     const Self = @This();
-    source: []u8,
+    source: []const u8,
     start: usize,
     curr: usize,
     span: Span,
@@ -31,21 +31,8 @@ pub const Lexer = struct {
     error_occurred: bool,
     allocator: Allocator,
 
-    pub fn init(
-        file_path: []const u8,
-        source: []u8,
-        options: Options,
-        allocator: Allocator
-    ) Self {
-        return Self{ 
-            .source = source, 
-            .start = 0, 
-            .curr = 0, 
-            .span = Span.init(file_path, 1, 0, 0), 
-            .options = options,
-            .error_occurred = false,
-            .allocator = allocator
-        };
+    pub fn init(file_path: []const u8, source: []const u8, options: Options, allocator: Allocator) Self {
+        return Self{ .source = source, .start = 0, .curr = 0, .span = Span.init(file_path, 1, 0, 0), .options = options, .error_occurred = false, .allocator = allocator };
     }
 
     pub fn tokenize(self: *Self) !ArrayList(Token) {
@@ -56,10 +43,10 @@ pub const Lexer = struct {
 
             try list.append(token);
         }
-        
+
         try list.append(Token.eof(self.span));
 
-        if (self.options.args & @intFromEnum(Option.DebugTokens) != 0) 
+        if (self.options.args & @intFromEnum(Option.DebugTokens) != 0)
             try self.print_tokens(list.items);
 
         return list;
@@ -147,16 +134,18 @@ pub const Lexer = struct {
 
     fn whitespace(self: *Self) void {
         while (true) {
-            switch (self.current()) {
-                '\n' => {
-                    _ = self.bump();
-                    self.span.line += 1;
-                    self.span.start = 0;
-                    self.span.end = 0;
-                },
-                ' ', '\r', '\t' => _ = self.bump(),
-                else => break,
-            }
+            if (self.peek()) |char| {
+                switch (char) {
+                    '\n' => {
+                        _ = self.bump();
+                        self.span.line += 1;
+                        self.span.start = 0;
+                        self.span.end = 0;
+                    },
+                    ' ', '\r', '\t' => _ = self.bump(),
+                    else => break,
+                }
+            } else break;
         }
     }
 
@@ -264,7 +253,6 @@ pub const Lexer = struct {
 
         const keyword = self.is_keyword(value) catch return LexerError.AllocationError;
         if (keyword) |token| return self.make_token(token);
-        
 
         return self.make_token(TokenKind.Identifier);
     }
@@ -292,7 +280,7 @@ pub const Lexer = struct {
     }
 
     inline fn is_at_end(self: *Self) bool {
-        return self.curr >= self.source.len;
+        return self.curr >= self.source.len - 1;
     }
 
     fn is_match(self: *Self, expected: u8) bool {
@@ -329,7 +317,7 @@ pub const Lexer = struct {
     }
 
     fn log_error(self: *Self, comptime fmt: []const u8, args: anytype) void {
-        const message = std.fmt.allocPrint( self.allocator, fmt, args) catch return;
+        const message = std.fmt.allocPrint(self.allocator, fmt, args) catch return;
         Logger.interpreter_error(&self.span, message) catch return;
         self.error_occurred = true;
         self.allocator.free(message);

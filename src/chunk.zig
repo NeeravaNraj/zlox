@@ -129,7 +129,7 @@ pub const Chunk = struct {
         return self.lines.items.len;
     }
 
-    fn deinit(self: *Self) void {
+    pub fn deinit(self: *Self) void {
         self.lines.deinit();
         self.code.deinit();
         self.constants.deinit();

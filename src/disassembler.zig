@@ -11,7 +11,8 @@ pub const Disassembler = struct {
     }
 
     pub fn disassemble_chunk(self: *Self, chunk: *Chunk) !void {
-        try self.print("==== Debug ====\n", .{});
+        try self.print(" {0s:=>23}Disassembler{0s:=<22}\n", .{" "});
+        try self.print("  CODE{0s: >7}LINE{0s: >11}OPCODES\n\n", .{""});
 
         var offset: usize = 0;
         while (offset < chunk.code_len()) {
@@ -20,13 +21,13 @@ pub const Disassembler = struct {
     }
 
     pub fn disassemble_instruction(self: *Self, chunk: *Chunk, offset: usize) !usize {
-        try self.print("{:0>4}", .{offset});
+        try self.print("  {d:0>4}", .{offset});
 
         if (offset > 0 and chunk.check_previous(offset)) {
-            try self.print("   |  ", .{});
+            try self.print("{s: >8}", .{"|"});
         } else {
             if (chunk.get_line(offset)) |line|
-                try self.print("{:>4}  ", .{line});
+                try self.print("{: >8}", .{line});
         }
 
         const instruction: Opcodes = @enumFromInt(chunk.code.items[offset]);
@@ -60,7 +61,7 @@ pub const Disassembler = struct {
     }
 
     fn simple_instruction(self: *Self, instruction: Opcodes, offset: usize) !usize {
-        try self.print("{}\n", .{instruction});
+        try self.print("{s: >12}{s}\n", .{" ", instruction.to_string()});
         return offset + 1;
     }
 
@@ -68,7 +69,7 @@ pub const Disassembler = struct {
         var change: usize = 0; // this is 9 as size(u8) + usize
         const index = chunk.read_constant(offset, &change);
 
-        try self.print("{s: <16} {:04} '", .{instruction.to_string(),  offset});
+        try self.print("{0s: >12}{1s}{0s: >12}{2d:0>4} '", .{" ", instruction.to_string(), offset});
         try self.print("{}\n", .{chunk.constants.items[index]});
 
         return offset + change;

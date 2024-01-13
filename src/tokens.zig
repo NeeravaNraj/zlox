@@ -105,11 +105,11 @@ pub const Span = struct {
 pub const Token = struct {
     const Self = @This();
     kind: TokenKind,
-    lexeme: []u8,
+    lexeme: []const u8,
     span: Span,
     literal: ?Object,
 
-    pub fn init(kind: TokenKind, lexeme: []u8, span: Span, object: ?Object) Self {
+    pub fn init(kind: TokenKind, lexeme: []const u8, span: Span, object: ?Object) Self {
         return Self{
             .kind = kind,
             .lexeme = lexeme,
