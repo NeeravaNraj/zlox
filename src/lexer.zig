@@ -228,8 +228,8 @@ pub const Lexer = struct {
                     continue;
                 }
             }
-            _ = self.bump();
             literal.push_char(self.current()) catch return LexerError.AllocationError;
+            _ = self.bump();
         }
 
         if (!terminated) {

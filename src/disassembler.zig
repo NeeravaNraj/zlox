@@ -66,11 +66,11 @@ pub const Disassembler = struct {
     }
 
     fn constant_instruction(self: *Self, instruction: Opcodes, chunk: *Chunk, offset: usize) !usize {
-        var change: usize = 0; // this is 9 as size(u8) + usize
-        const index = chunk.read_constant(offset, &change);
+        var change: usize = 0;
+        const value = chunk.read_constant(offset, &change);
 
         try self.print("{0s: >12}{1s}{0s: >12}{2d:0>4} '", .{" ", instruction.to_string(), offset});
-        try self.print("{}\n", .{chunk.constants.items[index]});
+        try self.print("{}\n", .{value});
 
         return offset + change;
     }

@@ -69,11 +69,11 @@ pub const Compiler = struct {
         _ = can_assign;
         switch (f) {
             // prefix
-            RuleFn.Number => self.number(),
+            RuleFn.Number,
+            RuleFn.String => self.constant_value(),
             RuleFn.Grouping => self.grouping(),
             RuleFn.Unary => self.unary(),
-            // RuleFn.Literal => self.literal(),
-            // RuleFn.String => self.string(),
+            RuleFn.Literal => self.literal(),
             // RuleFn.Variable => self.variable(can_assign),
             //
             // infix
@@ -121,9 +121,18 @@ pub const Compiler = struct {
         self.consume(TokenKind.RightParen, "expected ')' after expression");
     }
 
-    fn number(self: *Self) void {
+    fn constant_value(self: *Self) void {
         const value = self.previous().literal.?;
         self.emit_constant(value);
+    }
+
+    fn literal(self: *Self) void {
+        switch (self.previous().kind) {
+            TokenKind.False => self.emit_byte(Opcodes.False),
+            TokenKind.True => self.emit_byte(Opcodes.True),
+            TokenKind.None => self.emit_byte(Opcodes.None),
+            else => unreachable,
+        }
     }
 
     fn unary(self: *Self) void {
@@ -140,13 +149,19 @@ pub const Compiler = struct {
     fn binary(self: *Self) void {
         const op = self.previous().kind;
         const rule = self.get_rule(op);
-        self.parse_precedence(RuleFn.get_precedence(rule)); // todo
+        self.parse_precedence(RuleFn.get_precedence(rule));
         
         switch (op) {
             TokenKind.Plus => self.emit_byte(Opcodes.Add),
             TokenKind.Minus => self.emit_byte(Opcodes.Subtract),
             TokenKind.Star => self.emit_byte(Opcodes.Multiply),
             TokenKind.Slash => self.emit_byte(Opcodes.Divide),
+            TokenKind.Equals => self.emit_byte(Opcodes.Equals),
+            TokenKind.BangEquals => self.emit_byte(Opcodes.NotEquals),
+            TokenKind.Greater => self.emit_byte(Opcodes.Greater),
+            TokenKind.Lesser => self.emit_byte(Opcodes.Less),
+            TokenKind.GreaterEquals => self.emit_byte(Opcodes.GreaterEquals),
+            TokenKind.LesserEquals => self.emit_byte(Opcodes.LessEquals),
             else => unreachable,
         }
     }

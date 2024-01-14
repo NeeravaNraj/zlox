@@ -12,7 +12,8 @@ const HELP =
 
 \\Options:
 \\  -h,  --help         Displays this screen.
-\\  -op, --opcodes      Displays the opcodes and stack values.
+\\  -d,  --debug        Displays current instruction and stack at runtime.
+\\  -op, --opcodes      Displays the all the opcodes after compilation.
 \\  -t,  --tokens       Displays lexed tokens.
 \\  -gc, --log-gc       Log garbage collector.
 \\
@@ -24,6 +25,7 @@ pub const Option = enum(u16) {
     DebugOpcodes    = 0x2,      // Log opcodes
     DebugTokens     = 0x4,      // Log tokens  
     DebugGc         = 0x8,      // Log gc   
+    DebugTrace      = 0x10,      // Show debug trace
 };
 
 pub const Options = struct {
@@ -36,6 +38,8 @@ pub fn parse_args(args: *Args, allocator: Allocator) !Options {
     var opts = HashMap(Option).init(allocator);
     try opts.put("-h", Option.Help);
     try opts.put("--help", Option.Help);
+    try opts.put("-d", Option.DebugTrace);
+    try opts.put("--debug", Option.DebugTrace);
     try opts.put("-op", Option.DebugOpcodes);
     try opts.put("--opcodes", Option.DebugOpcodes);
     try opts.put("-t", Option.DebugTokens);
