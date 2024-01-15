@@ -49,6 +49,16 @@ pub const Object = union(enum) {
         };
     }
 
+    pub fn type_name(self: Self) []const u8{
+        return switch (self) {
+            Self.Int => "int",
+            Self.Float => "float",
+            Self.Bool => "bool",
+            Self.Str => "str",
+            Self.None => "none",
+        };
+    }
+
     pub fn add(self: Self, rhs: Self) OperationError!Self {
         switch (Self.pair(self, rhs)) {
             Self.pair(.Int, .Int) => return Self{ .Int = self.Int + rhs.Int },

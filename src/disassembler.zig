@@ -32,7 +32,9 @@ pub const Disassembler = struct {
 
         const instruction: Opcodes = @enumFromInt(chunk.code.items[offset]);
         switch (instruction) {
-            Opcodes.Constant => return self.constant_instruction(instruction, chunk, offset),
+            Opcodes.Constant,
+            Opcodes.GetGlobal,
+            Opcodes.DefGlobal => return self.constant_instruction(instruction, chunk, offset),
             Opcodes.Negate,
             Opcodes.Add,
             Opcodes.Subtract,

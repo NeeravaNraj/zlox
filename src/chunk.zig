@@ -49,15 +49,8 @@ pub const Chunk = struct {
         }
     }
 
-    pub fn write_constant(self: *Self, value: Object, line: usize) !void {
+    pub fn write_index(self: *Self, index: usize) !void {
         const size: usize = @intCast(@bitSizeOf(usize) / 8);
-        const index = self.constants_len();
-        try self.constants.append(value);
-        try self.write(Opcodes.Constant, line);
-        // we store the size of how many bytes we want to read,
-        // one byte before the actual value.
-        // might be unnecessary but I will roll with this for now
-        try self.code.append(size);
         // encode a usize into u8's to store in the code section
         for (0..size) |i| {
             const shift_by: u6 = @intCast(size * i);
@@ -66,10 +59,17 @@ pub const Chunk = struct {
         }
     }
 
+    pub fn write_constant(self: *Self, value: Object, line: usize) !void {
+        const index = self.constants_len();
+        try self.constants.append(value);
+        try self.write(Opcodes.Constant, line);
+        try self.write_index(index);
+    }
+
     pub fn read_constant(self: *Self, offset: usize, change: *usize) Object {
-        const size = self.code.items[offset + 1];
+        const size: usize = @intCast(@bitSizeOf(usize) / 8);
         var value: usize = 0;
-        const pointer = offset + 2;
+        const pointer = offset + 1;
 
         for (0..size) |i| {
             const byte: usize = @intCast(self.code.items[pointer + i]);
@@ -77,9 +77,15 @@ pub const Chunk = struct {
             value |= byte << shift_by;
         }
 
-        change.* += @intCast(size + 2);
+        change.* += @intCast(size + 1);
         return self.constants.items[value];
     }
+
+    pub fn add_constant_manual(self: *Self, constant: Object) !usize {
+        try self.constants.append(constant);
+        return self.constants.items.len - 1;
+    }
+
 
     pub fn get_line(self: *Self, index: usize) ?usize {
         for (self.lines.items, 0..) |line, i| {
