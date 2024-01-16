@@ -31,8 +31,16 @@ pub const Lexer = struct {
     error_occurred: bool,
     allocator: Allocator,
 
-    pub fn init(file_path: []const u8, source: []const u8, options: Options, allocator: Allocator) Self {
-        return Self{ .source = source, .start = 0, .curr = 0, .span = Span.init(file_path, 1, 0, 0), .options = options, .error_occurred = false, .allocator = allocator };
+    pub fn init(source: []const u8, options: Options, allocator: Allocator) Self {
+        return Self{ 
+            .source = source, 
+            .start = 0, 
+            .curr = 0, 
+            .span = Span.init(options.file.?, 1, 0, 0), 
+            .options = options, 
+            .error_occurred = false, 
+            .allocator = allocator 
+        };
     }
 
     pub fn tokenize(self: *Self) !ArrayList(Token) {

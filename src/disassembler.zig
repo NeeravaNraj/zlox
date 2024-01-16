@@ -10,8 +10,8 @@ pub const Disassembler = struct {
         return Self {};
     }
 
-    pub fn disassemble_chunk(self: *Self, chunk: *Chunk) !void {
-        try self.print(" {0s:=>23}Disassembler{0s:=<22}\n", .{" "});
+    pub fn disassemble_chunk(self: *Self, name: []const u8, chunk: *Chunk) !void {
+        try self.print(" {0s:=>23}{1s}{0s:=<22}\n", .{" ", name});
         try self.print("  CODE{0s: >7}LINE{0s: >11}OPCODES\n\n", .{""});
 
         var offset: usize = 0;
@@ -34,6 +34,9 @@ pub const Disassembler = struct {
         switch (instruction) {
             Opcodes.Constant,
             Opcodes.GetGlobal,
+            Opcodes.SetGlobal,
+            Opcodes.GetLocal,
+            Opcodes.SetLocal,
             Opcodes.DefGlobal => return self.constant_instruction(instruction, chunk, offset),
             Opcodes.Negate,
             Opcodes.Add,

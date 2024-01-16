@@ -17,14 +17,6 @@ fn readFile(path: []const u8, allocator: Allocator) ![]u8 {
 pub fn main() !void {
     var gpa = GPA(.{}){};
     const allocator = gpa.allocator();
-    // var chunk = Chunk.init(allocator);
-    // defer chunk.deinit();
-    // try chunk.write(Opcodes.Add, 1);
-    // for (1..20) |i| {
-    //     try chunk.write_constant(Object { .Int = @intCast(i) }, i);
-    // }
-    // var disasm = Disassembler.init();
-    // try disasm.disassemble_chunk(&chunk);
     var args = std.process.args();
     _ = args.skip();
     
@@ -37,7 +29,7 @@ pub fn main() !void {
             std.process.exit(1);
         };
 
-        var vm = Vm.init(file, options, allocator);
+        var vm = Vm.init(options, allocator);
         try vm.interpret(contents);
 
     } else {

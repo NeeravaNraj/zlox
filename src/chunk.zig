@@ -67,6 +67,11 @@ pub const Chunk = struct {
     }
 
     pub fn read_constant(self: *Self, offset: usize, change: *usize) Object {
+        const index = self.read_index(offset, change);
+        return self.constants.items[index];
+    }
+
+    pub fn read_index(self: *Self, offset: usize, change: *usize) usize {
         const size: usize = @intCast(@bitSizeOf(usize) / 8);
         var value: usize = 0;
         const pointer = offset + 1;
@@ -78,7 +83,7 @@ pub const Chunk = struct {
         }
 
         change.* += @intCast(size + 1);
-        return self.constants.items[value];
+        return value;
     }
 
     pub fn add_constant_manual(self: *Self, constant: Object) !usize {

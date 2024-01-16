@@ -7,6 +7,7 @@ const arg_parser = @import("arg_parser.zig");
 const Opcodes = @import("opcodes.zig").Opcodes;
 const Compiler = @import("compiler.zig").Compiler;
 const Disassembler = @import("disassembler.zig").Disassembler;
+const Function = @import("function.zig").Function;
 const logger = @import("logger.zig");
 const Logger = logger.Logger;
 const Level = logger.Level;
@@ -17,6 +18,13 @@ const Option = arg_parser.Option;
 const Options = arg_parser.Options;
 const HashMap = std.StringHashMap;
 
+const CallFrame = struct {
+    function: *Function,
+    ip: usize,
+    // this value tells the callframe where its variables start from
+    slot_start: usize,
+};
+
 pub const Vm = struct {
     const Self = @This();
     const InterpreterError = error {
@@ -26,23 +34,19 @@ pub const Vm = struct {
         Trace,
     };
 
-    file: []const u8,
-    ip: usize,
-    chunk: Chunk,
     options: Options,
     stack: ArrayList(Object),
     globals: HashMap(Object),
+    frames: ArrayList(CallFrame),
     source_map: ArrayList(Span),
     disassembler: Disassembler,
     allocator: Allocator,
 
-    pub fn init(file: []const u8, options: Options, allocator: Allocator) Self {
+    pub fn init(options: Options, allocator: Allocator) Self {
         return Self {
-            .file = file,
-            .chunk = Chunk.init(allocator),
-            .ip = 0,
             .stack = ArrayList(Object).init(allocator),
             .globals = HashMap(Object).init(allocator),
+            .frames = ArrayList(CallFrame).init(allocator),
             .source_map = undefined,
             .options = options,
             .allocator = allocator,
@@ -51,21 +55,32 @@ pub const Vm = struct {
     }
 
     pub fn interpret(self: *Self, source: []const u8) InterpreterError!void {
-        var compiler = Compiler.init(self.file, &self.chunk, self.options, self.allocator);
-        self.source_map = compiler.compile(source) catch return InterpreterError.Compile;
+        var compiler = Compiler.init(self.options, self.allocator) catch 
+            return InterpreterError.AllocationError;
+        const function = compiler.compile(source) catch return InterpreterError.Compile;
 
+        const frame = CallFrame {
+            .function = @constCast(&function),
+            .ip = 0,
+            .slot_start = 1,
+        };
+
+        try self.push(Object{ .Fn = function });
+        try self.push_frame(frame);
         defer {
             self.deinit();
-            compiler.deinit();
         }
 
         try self.run();
     }
 
     fn run(self: *Self) InterpreterError!void {
+        const frame = self.get_current_frame();
+        const chunk = &frame.function.chunk;
         while (true) {
-            if (self.options.args & @intFromEnum(Option.DebugTrace) != 0) try self.log_trace();
-            const instruction: Opcodes = @enumFromInt(self.chunk.code.items[self.ip]);
+            if (self.options.args & @intFromEnum(Option.DebugTrace) != 0) 
+                try self.log_trace();
+            const instruction: Opcodes = @enumFromInt(chunk.code.items[frame.ip]);
             switch (instruction) {
                 Opcodes.Return => return,
                 Opcodes.Print => {
@@ -74,10 +89,10 @@ pub const Vm = struct {
                 },
                 Opcodes.Constant => {
                     var change: usize = 0;
-                    const value = self.chunk.read_constant(self.ip, &change);
+                    const value = chunk.read_constant(frame.ip, &change);
                     try self.push(value);
                     // jump over the value region
-                    self.ip += change - 1;
+                    frame.ip += change - 1;
                 },
                 Opcodes.Negate => {
                     const value = self.pop().negate() catch {
@@ -106,32 +121,76 @@ pub const Vm = struct {
 
                 Opcodes.DefGlobal => try self.def_global(),
                 Opcodes.GetGlobal => try self.get_global(),
+                Opcodes.SetGlobal => try self.set_global(),
+                Opcodes.GetLocal => try self.get_local(),
+                Opcodes.SetLocal => try self.set_local(),
 
                 else => return InterpreterError.Interpreter
             }
-            self.ip += 1;
+            frame.ip += 1;
         }
     }
 
-    fn def_global(self: *Self) InterpreterError!void {
+    fn get_local(self: *Self) InterpreterError!void {
+        const frame = self.get_current_frame();
+        var chunk = frame.function.chunk;
         var change: usize = 0;
-        var name = self.chunk.read_constant(self.ip, &change);
+        const index = chunk.read_index(frame.ip, &change);
+        try self.push(self.stack.items[frame.slot_start + index]);
+        frame.ip += change - 1;
+    }
+
+    fn set_local(self: *Self) InterpreterError!void {
+        const frame = self.get_current_frame();
+        var chunk = frame.function.chunk;
+        var change: usize = 0;
+        const index = chunk.read_index(frame.ip, &change);
+        self.stack.items[frame.slot_start + index] = self.peek(0);
+        frame.ip += change - 1;
+    }
+
+    fn def_global(self: *Self) InterpreterError!void {
+        var frame = self.get_current_frame();
+        var chunk = frame.function.chunk;
+        var change: usize = 0;
+        var name = chunk.read_constant(frame.ip, &change);
         self.globals.put(name.Str.as_slice(), self.peek(0)) catch 
             return InterpreterError.AllocationError;
         _ = self.pop();
-        self.ip += change - 1;
+        frame.ip += change - 1;
     }
 
     fn get_global(self: *Self) InterpreterError!void {
+        var frame = self.get_current_frame();
+        var chunk = frame.function.chunk;
         var change: usize = 0;
-        const name = self.chunk.read_constant(self.ip, &change);
+        const name = chunk.read_constant(frame.ip, &change);
         if (self.globals.get(@constCast(&name.Str).as_slice())) |value| {
             try self.push(value);
         } else {
             return self.error_at("undefined variable '{s}'", .{@constCast(&name.Str).as_slice()});
         }
-        self.ip += change - 1;
+        frame.ip += change - 1;
     }
+
+    fn set_global(self: *Self) InterpreterError!void {
+        var frame = self.get_current_frame();
+        var chunk = frame.function.chunk;
+        var change: usize = 0;
+        const name = chunk.read_constant(frame.ip, &change);
+        if (self.globals.contains(@constCast(&name.Str).as_slice())) {
+            self.globals.put(@constCast(&name.Str).as_slice(), self.peek(0)) catch 
+                return InterpreterError.AllocationError;
+
+        } else {
+            return self.error_at(
+                "undefined variable '{s}'", 
+                .{@constCast(&name.Str).as_slice()}
+            );
+        }
+        frame.ip += change - 1;
+    }
+
 
     fn equals(self: *Self, not: bool) InterpreterError!void {
         const rhs = self.pop();
@@ -152,11 +211,17 @@ pub const Vm = struct {
 
         const value = if (greater) val: {
             break :val lhs.gt(rhs) catch {
-                return self.error_at("cannot compare types '{s}' and '{s}'", .{lhs.type_name(), rhs.type_name()});
+                return self.error_at(
+                    "cannot compare types '{s}' and '{s}'", 
+                    .{lhs.type_name(), rhs.type_name()}
+                );
             };
         } else vale: {
             break :vale lhs.lt(rhs) catch {
-                return self.error_at("cannot compare types '{s}' and '{s}'", .{lhs.type_name(), rhs.type_name()});
+                return self.error_at(
+                    "cannot compare types '{s}' and '{s}'", 
+                    .{lhs.type_name(), rhs.type_name()}
+                );
             };
         };
 
@@ -169,11 +234,17 @@ pub const Vm = struct {
         // TODO: log errors
         const value = if (greater) val: {
             break :val lhs.ge(rhs) catch {
-                return self.error_at("cannot compare types '{s}' and '{s}'", .{lhs.type_name(), rhs.type_name()});
+                return self.error_at(
+                    "cannot compare types '{s}' and '{s}'",
+                    .{lhs.type_name(), rhs.type_name()}
+                );
             };
         } else vale: {
             break :vale lhs.le(rhs) catch {
-                return self.error_at("cannot compare types '{s}' and '{s}'", .{lhs.type_name(), rhs.type_name()});
+                return self.error_at(
+                    "cannot compare types '{s}' and '{s}'", 
+                    .{lhs.type_name(), rhs.type_name()}
+                );
             };
         };
 
@@ -221,8 +292,9 @@ pub const Vm = struct {
     }
 
     fn log_trace(self: *Self) InterpreterError!void {
+        var frame = self.get_current_frame();
         std.debug.print("stack trace: [", .{});
-        for (self.stack.items, 0..) |slot, i| {
+        for (self.stack.items, frame.slot_start..) |slot, i| {
             std.debug.print("{}", .{slot});
             if (self.stack.items.len > i)
                 std.debug.print(", ", .{});
@@ -231,7 +303,7 @@ pub const Vm = struct {
 
         _ = self
             .disassembler
-            .disassemble_instruction(&self.chunk, self.ip) catch 
+            .disassemble_instruction(&frame.function.chunk, frame.ip) catch 
             return InterpreterError.Trace;
     }
 
@@ -243,6 +315,14 @@ pub const Vm = struct {
         self.stack.append(value) catch return InterpreterError.AllocationError;
     }
 
+    fn push_frame(self: *Self, value: CallFrame) InterpreterError!void {
+        self.frames.append(value) catch return InterpreterError.AllocationError;
+    }
+
+    fn frame_len(self: *Self) usize {
+        return self.frames.items.len;
+    }
+
     fn peek(self: *Self, distance: usize) Object {
         return self.stack.items[self.stack.items.len - 1 - distance];
     }
@@ -252,12 +332,13 @@ pub const Vm = struct {
     }
 
     fn deinit(self: *Self) void {
-        self.chunk.deinit();
+        self.frames.deinit();
         self.stack.deinit();
     }
 
     fn error_at(self: *Self, comptime msg: []const u8, args: anytype) InterpreterError {
-        if (self.chunk.get_line(self.ip)) |line| {
+        var frame = self.get_current_frame();
+        if (frame.function.chunk.get_line(frame.ip)) |line| {
             if (self.get_source(line)) |span| {
                 self.log_error(&span, msg, args);
                 return InterpreterError.Interpreter;
@@ -268,10 +349,15 @@ pub const Vm = struct {
     }
 
     fn get_source(self: *Self, line: usize) ?Span {
-        for (self.source_map.items) |span| {
+        const frame = self.get_current_frame();
+        for (frame.function.source_map.items) |span| {
             if (span.line == line) return span;
         }
         return null;
+    }
+
+    fn get_current_frame(self: *Self) *CallFrame {
+        return @constCast(&self.frames.items[self.frames.items.len - 1]);
     }
 
     fn log_error(self: *Self, span: *const Span, comptime fmt: []const u8, args: anytype) void {

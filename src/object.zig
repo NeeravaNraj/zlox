@@ -1,5 +1,6 @@
 const std = @import("std");
 const String = @import("string.zig").String;
+const Function = @import("function.zig").Function;
 
 pub const Object = union(enum) {
     const Self = @This();
@@ -10,6 +11,7 @@ pub const Object = union(enum) {
     Float: f64,
     Int: i32,
     Str: String,
+    Fn: Function,
 
     pub const Tag = std.meta.Tag(Self);
     // Get the type that is used to store the underlying enum int
@@ -46,6 +48,7 @@ pub const Object = union(enum) {
             Self.Bool => |v| Self{ .Bool = !v },
             Self.Str => |v| Self{ .Bool = v.len == 0 },
             Self.None => Self{ .Bool = true },
+            Self.Fn => Self{ .Bool = false },
         };
     }
 
@@ -56,6 +59,7 @@ pub const Object = union(enum) {
             Self.Bool => "bool",
             Self.Str => "str",
             Self.None => "none",
+            Self.Fn => "fn"
         };
     }
 
@@ -184,9 +188,10 @@ pub const Object = union(enum) {
         switch (self) {
             Self.Float => |v| try writer.print("{d}", .{v}),
             Self.Int => |v| try writer.print("{}", .{v}),
-            Self.Str => |v| try writer.print("'{}'", .{v}),
+            Self.Str => |v| try writer.print("{}", .{v}),
             Self.Bool => |v| try writer.print("{}", .{v}),
             Self.None => try writer.print("none", .{}),
+            Self.Fn => |v| try writer.print("{}", .{v}),
         }
     }
 };
