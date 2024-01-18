@@ -4,14 +4,14 @@ const Lexer = @import("lexer.zig").Lexer;
 const Chunk = @import("chunk.zig").Chunk;
 const tokens = @import("tokens.zig");
 const logger = @import("logger.zig");
-const Logger = logger.Logger;
-const Level = logger.Level;
 const arg_parser = @import("arg_parser.zig");
 const Opcodes = @import("opcodes.zig").Opcodes;
 const rulefn = @import("rule.zig");
 const String = @import("string.zig").String;
 const Disasm = @import("disassembler.zig").Disassembler;
 const Function = @import("function.zig").Function;
+const Logger = logger.Logger;
+const Level = logger.Level;
 const Precedence = rulefn.Precedence;
 const RuleFn = rulefn.RuleFn;
 const ArrayList = std.ArrayList;
@@ -28,23 +28,51 @@ pub const FunctionType = enum {
 };
 
 pub const Local = struct {
-    name: *Token,
+    name: []const u8,
     depth: usize,
     initialized: bool
 };
 
-pub const Compiler = struct {
+const Compiler = struct {
     const Self = @This();
-    const CompilerError = error {
+    function: Function,
+    fn_type: FunctionType,
+    enclosing: ?*Self,
+    locals: ArrayList(Local),
+
+    pub fn init(fn_type: FunctionType, enclosing: ?*Self, allocator: Allocator) !Self {
+        var locals = ArrayList(Local).init(allocator);
+        // Append empty local to tell vm that variables 
+        // start after this point
+        try locals.append(Local {
+            .name = "",
+            .depth =  0,
+            .initialized = false,
+        });
+        return Self {
+            .fn_type = fn_type,
+            .function = try Function.default(allocator),
+            .enclosing = enclosing,
+            .locals = locals,
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.locals.deinit();
+    }
+};
+
+pub const Parser = struct {
+    const Self = @This();
+    const ParserError = error {
         Error,
         Lexer,
         Disassembler,
+        Allocation,
     };
 
     tokens: ArrayList(Token),
-    locals: ArrayList(Local),
-
-    function: Function,
+    compiler: *Compiler,
 
     curr: usize,
     depth: usize,
@@ -55,23 +83,24 @@ pub const Compiler = struct {
     options: Options,
     allocator: Allocator,
 
-    pub fn init(options: Options, allocator: Allocator) !Self {
+    pub fn init(options: Options, allocator: Allocator) Self {
         return Self {
             .tokens = undefined,
             .curr = 0,
             .depth = 0,
             .error_occurred = false,
-            .function = try Function.default(allocator),
-            .locals = ArrayList(Local).init(allocator),
+            .compiler = undefined,
             .panic_mode = false,
             .options = options,
             .allocator = allocator,
         };
     }
 
-    pub fn compile(self: *Self, source: []const u8) CompilerError!Function {
+    pub fn compile(self: *Self, source: []const u8) ParserError!Function {
+        const compiler = Compiler.init(FunctionType.Script, null, self.allocator) catch return ParserError.Allocation;
+        self.compiler = @constCast(&compiler);
         var lexer = Lexer.init(source, self.options, self.allocator);
-        self.tokens = lexer.tokenize() catch return CompilerError.Lexer;
+        self.tokens = lexer.tokenize() catch return ParserError.Lexer;
         defer self.tokens.deinit();
         while (!self.is_match(TokenKind.Eof)) {
             self.statement();
@@ -81,33 +110,107 @@ pub const Compiler = struct {
         if (self.options.args & @intFromEnum(Option.DebugOpcodes) != 0) {
             var disasm = Disasm.init();
             disasm.disassemble_chunk(
-                self.function.name.as_slice(), 
+                self.current_function().name, 
                 self.current_chunk()
-            ) catch return CompilerError.Disassembler;
+            ) catch return ParserError.Disassembler;
         }
 
-        if (self.error_occurred) return CompilerError.Error;
-        return self.function;
+        if (self.error_occurred) return ParserError.Error;
+        return self.compiler.function;
+    }
+
+    fn end_compiler(self: *Self) Function {
+        self.emit_byte(Opcodes.Return);
+
+        const function = self.compiler.function;
+        if (self.compiler.enclosing) |compiler|
+            self.compiler = compiler;
+
+        return function;
     }
 
     fn statement(self: *Self) void {
         switch (self.current().kind) {
             TokenKind.Print => self.print_statement(),
             TokenKind.Let => self.let_statement(),
-            TokenKind.LeftBrace => self.block(),
+            TokenKind.LeftBrace => {
+                self.begin_scope();
+                self.block();
+                self.end_scope();
+            },
+            TokenKind.Fn => self.function_statement(),
             else => self.expression_statement(),
         }
 
         if (self.panic_mode) self.synchronize();
     }
 
+    fn function_statement(self: *Self) void {
+        self.advance();
+        const global = self.parse_variable("expected function name");
+        self.mark_initialized();
+        self.function_decl(FunctionType.Fn);
+        self.define_variable(global);
+    }
+
+    fn function_decl(self: *Self, fn_type: FunctionType) void {
+        var compiler = Compiler.init(fn_type, self.compiler, self.allocator) catch {
+            self.log_error(
+                @constCast(&self.current().span), 
+                "allocation failed at `function_decl`", .{}
+            );
+            return;
+        };
+        defer compiler.deinit();
+        self.compiler = &compiler;
+        self.compiler.function.name = self.previous().lexeme;
+        self.begin_scope();
+
+        self.consume(TokenKind.LeftParen, "expected '(' after function name");
+        if (!self.check(TokenKind.RightParen)) {
+            while (true) {
+                if (self.compiler.function.arity >= 255) {
+                    self.log_error(
+                        @constCast(&self.previous().span), 
+                        "function cannot have more than 255 parameters", 
+                        .{}
+                    );
+                    // synchronize
+                    while (!self.check(TokenKind.RightParen)) self.advance();
+                    break;
+                }
+                self.compiler.function.arity += 1;
+                const constant = self.parse_variable("expected parameter name");
+                self.define_variable(constant);
+                if (self.check(TokenKind.Comma)) {
+                    self.advance();
+                    if (self.check(TokenKind.RightParen)) break;
+                    continue;
+                }
+
+                break;
+            }
+        }
+        self.consume(TokenKind.RightParen, "expected ')' after parameters");
+        if (!self.check(TokenKind.LeftBrace)) {
+            self.log_error(
+                @constCast(&self.current().span), 
+                "expected '{{' before function body", .{}
+            );
+            return;
+        }
+        self.block();
+        const function = self.end_compiler();
+
+        self.end_scope();
+        self.emit_constant(Object{ .Fn = function });
+    }
+
     fn block(self: *Self,) void {
         self.advance();
-        self.begin_scope();
         while (!self.check(TokenKind.RightBrace) and !self.check(TokenKind.Eof))
             self.statement();
-        self.consume(TokenKind.RightBrace, "expected '}' after block");
-        self.end_scope();
+        self.consume(TokenKind.RightBrace, "expected '}}' after block");
     }
 
     fn let_statement(self: *Self) void {
@@ -162,34 +265,40 @@ pub const Compiler = struct {
     fn declare_variable(self: *Self) void {
         if (self.depth == 0) return;
         const name = self.previous();
-        if (self.locals.items.len > 0)
-        for ((self.locals.items.len - 1)..0) |i| {
-            const local = self.locals.items[i];
-            if (local.initialized and local.depth < self.depth) break;
-            if (std.mem.eql(u8, name.lexeme, local.name.lexeme))
-                self.log_error(
-                    &name.span, 
-                    "variable with name '{s}' already exists in current scope", 
-                    .{name.lexeme}
-                );
-        };
+        if (self.locals().items.len > 0) {
+            var i = self.locals().items.len - 1;
+            while (i >= 0) {
+                const local = self.locals().items[i];
+                if (local.initialized and local.depth < self.depth) break;
+                if (std.mem.eql(u8, name.lexeme, local.name))
+                    self.log_error(
+                        &name.span, 
+                        "variable with name '{s}' already exists in current scope", 
+                        .{name.lexeme}
+                    );
+                if (i == 0) break;
+                i -= 1;
+            }
+        }
+
         self.add_local(name);
     }
 
     fn add_local(self: *Self, name: *Token) void {
         const local = Local {
-            .name = name,
+            .name = name.lexeme,
             .depth = self.depth,
             .initialized = false,
         };
-        self.locals.append(local) catch {
+        self.locals().append(local) catch {
             self.log_error(&name.span, "allocation failed at `add_local`", .{});
             return;
         };
     }
 
     fn mark_initialized(self: *Self) void {
-        self.locals.items[self.locals.items.len - 1].initialized = true;
+        if (self.depth == 0) return;
+        self.locals().items[self.locals().items.len - 1].initialized = true;
     }
 
     fn print_statement(self: *Self) void {
@@ -233,7 +342,8 @@ pub const Compiler = struct {
             RuleFn.Unary => self.unary(),
             RuleFn.Literal => self.literal(),
             RuleFn.Variable => self.variable(can_assign),
-            //
+            RuleFn.Call => self.call(),
+
             // infix
             RuleFn.Binary => self.binary(),
             // RuleFn.Ternary => self.ternary(),
@@ -276,6 +386,42 @@ pub const Compiler = struct {
             self.log_error(&self.current().span, "invalid assignment target", .{});
     }
 
+    fn argument_count(self: *Self) u8 {
+        var arg_count: u8 = 0;
+        
+        if (!self.check(TokenKind.RightParen)) {
+            while (true) {
+                if (arg_count >= 255) {
+                    self.log_error(
+                        @constCast(&self.previous().span), 
+                        "cannot pass more than 255 parameters to function", 
+                        .{}
+                    );
+                    // synchronize
+                    while (!self.is_match(TokenKind.RightParen)) self.advance();
+                    break;
+                }
+                self.expression();
+                arg_count += 1;
+                if (self.check(TokenKind.Comma)) {
+                    self.advance();
+                    if (self.is_match(TokenKind.RightParen)) break;
+                    continue;
+                }
+                self.consume(TokenKind.RightParen, "expected ')' after function arguments");
+                break;
+            }
+        }
+
+        return arg_count;
+    }
+
+    fn call(self: *Self) void {
+        const arg_count: u8 = self.argument_count();
+        self.emit_byte(Opcodes.Call);
+        self.emit_value(arg_count);
+    }
+
     fn variable(self: *Self, can_assign: bool) void {
         self.named_variable(self.previous(), can_assign);
     }
@@ -308,14 +454,15 @@ pub const Compiler = struct {
     }
 
     fn resolve_local(self: *Self, name: *Token) ?usize {
-        if (self.locals.items.len == 0) return null;
-        var i = self.locals.items.len - 1;
+        if (self.locals().items.len == 0) return null;
+        var i = self.locals().items.len - 1;
         while (i >= 0) {
-            const local = self.locals.items[i];
-            if (std.mem.eql(u8, name.lexeme, local.name.lexeme)) {
+            const local = self.locals().items[i];
+            if (std.mem.eql(u8, name.lexeme, local.name)) {
                 if (self.depth == 1 and !local.initialized) return null;
                 return if (local.initialized) i else i - 1;
             }
+            if (i == 0) break;
             i -= 1;
         }
 
@@ -381,7 +528,7 @@ pub const Compiler = struct {
     }
 
     fn map_source(self: *Self, span: Span) void {
-        self.function.source_map.append(span) catch {
+        self.current_function().source_map.append(span) catch {
             self.log_error(@constCast(&span), "allocation failed at `map_source`", .{});
             return;
         };
@@ -395,6 +542,10 @@ pub const Compiler = struct {
     fn emit_byte(self: *Self, op_code: Opcodes) void {
         // TODO: handle error
         self.current_chunk().write(op_code, self.previous().span.line) catch return;
+    }
+
+    fn emit_value(self: *Self, byte: u8) void {
+        self.current_chunk().code.append(byte) catch return;
     }
 
     fn emit_constant(self: *Self, constant: Object) void {
@@ -444,7 +595,11 @@ pub const Compiler = struct {
     }
 
     fn current_chunk(self: *Self) *Chunk {
-        return &self.function.chunk;
+        return &self.compiler.function.chunk;
+    }
+
+    fn current_function(self: *Self) *Function {
+        return &self.compiler.function;
     }
 
     fn begin_scope(self: *Self) void {
@@ -454,12 +609,16 @@ pub const Compiler = struct {
     fn end_scope(self: *Self) void {
         self.depth -= 1;
         while (
-            self.locals.items.len > 0 and 
-            self.locals.items[self.locals.items.len - 1].depth > self.depth
+            self.locals().items.len > 0 and 
+            self.locals().items[self.locals().items.len - 1].depth > self.depth
         ) {
             self.emit_byte(Opcodes.Pop);
-            _ = self.locals.pop();
+            _ = self.locals().pop();
         }
+    }
+
+    fn locals(self: *Self) *ArrayList(Local) {
+        return &self.compiler.locals;
     }
 
     fn log_error(self: *Self, span: *Span, comptime fmt: []const u8, args: anytype) void {

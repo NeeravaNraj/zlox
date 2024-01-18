@@ -41,6 +41,7 @@ pub const RuleFn = enum(u16) {
     Ternary = 0x200,
     And = 0x300,
     Or = 0x400,
+    Call = 0x500,
 
     pub fn parse(kind: TokenKind) u16 {
         //  0 - none
@@ -49,7 +50,7 @@ pub const RuleFn = enum(u16) {
         //  3 - unary
         //  4 - binary
         return switch (kind) {
-            TokenKind.LeftParen => @intFromEnum(Precedence.None) | @intFromEnum(RuleFn.Grouping),
+            TokenKind.LeftParen => @intFromEnum(Precedence.Call) | @intFromEnum(RuleFn.Grouping) | @intFromEnum(RuleFn.Call),
             TokenKind.Minus => @intFromEnum(Precedence.Term) | @intFromEnum(RuleFn.Binary) | @intFromEnum(RuleFn.Unary),
             TokenKind.Plus => @intFromEnum(Precedence.Term) | @intFromEnum(RuleFn.Binary),
             TokenKind.Slash => @intFromEnum(Precedence.Factor) | @intFromEnum(RuleFn.Binary),
@@ -89,5 +90,4 @@ pub const RuleFn = enum(u16) {
     pub fn get_postfix(rule: u16) RuleFn {
         return @enumFromInt(rule & POSTFIX_MASK);
     }
-
 };

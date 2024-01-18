@@ -32,6 +32,7 @@ pub const Disassembler = struct {
 
         const instruction: Opcodes = @enumFromInt(chunk.code.items[offset]);
         switch (instruction) {
+            Opcodes.Call => return self.byte_instruction(instruction, chunk, offset),
             Opcodes.Constant,
             Opcodes.GetGlobal,
             Opcodes.SetGlobal,
@@ -70,11 +71,20 @@ pub const Disassembler = struct {
         return offset + 1;
     }
 
+    fn byte_instruction(self: *Self, instruction: Opcodes, chunk: *Chunk, offset: usize) !usize {
+        const value = chunk.code.items[offset + 1];
+
+        try self.print("{0s: >12}{1s: <24}'", .{" ", instruction.to_string()});
+        try self.print("{d}\n", .{value});
+
+        return offset + 2;
+    }
+
     fn constant_instruction(self: *Self, instruction: Opcodes, chunk: *Chunk, offset: usize) !usize {
         var change: usize = 0;
         const value = chunk.read_constant(offset, &change);
 
-        try self.print("{0s: >12}{1s}{0s: >12}{2d:0>4} '", .{" ", instruction.to_string(), offset});
+        try self.print("{0s: >12}{1s: <24}{2d:0>4} '", .{" ", instruction.to_string(), offset});
         try self.print("{}\n", .{value});
 
         return offset + change;

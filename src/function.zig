@@ -10,14 +10,14 @@ pub const Function = struct {
     const Self = @This();
     arity: u8,
     chunk: Chunk,
-    name: String,
+    name: []const u8,
     source_map: ArrayList(Span),
     allocator: Allocator,
 
     pub fn init(name: []const u8, arity: u8, allocator: Allocator) !Self {
         return Self {
             .arity = arity,
-            .name = try String.init(name, allocator),
+            .name = name,
             .chunk = Chunk.init(allocator),
             .source_map = ArrayList(Span).init(allocator),
             .allocator = allocator,
@@ -27,7 +27,7 @@ pub const Function = struct {
     pub fn default(allocator: Allocator) !Self {
         return Self {
             .arity = 0,
-            .name = try String.init("", allocator),
+            .name = "",
             .chunk = Chunk.init(allocator),
             .source_map = ArrayList(Span).init(allocator),
             .allocator = allocator,

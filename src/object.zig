@@ -18,10 +18,15 @@ pub const Object = union(enum) {
     pub const EnumInt = @typeInfo(Tag).Enum.tag_type;
     // Make a new type that is twice as large as the underlying enum int
     // This is so that we can store two tags in one int
+    pub const Single = std.meta.Int(.unsigned, @bitSizeOf(EnumInt) * 2);
     pub const Pair = std.meta.Int(.unsigned, @bitSizeOf(EnumInt) * 2);
 
     pub fn asInt(tag: Tag) EnumInt {
         return @intFromEnum(tag);
+    }
+
+    pub fn single(self: Tag) Single {
+        return @as(Single, asInt(self));
     }
 
     // if we had only float and int
@@ -193,5 +198,9 @@ pub const Object = union(enum) {
             Self.None => try writer.print("none", .{}),
             Self.Fn => |v| try writer.print("{}", .{v}),
         }
+    }
+
+    pub fn is_fn(self: Self) bool {
+        return single(self) == single(.Fn);
     }
 };
