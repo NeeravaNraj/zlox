@@ -42,13 +42,6 @@ const Compiler = struct {
 
     pub fn init(fn_type: FunctionType, enclosing: ?*Self, allocator: Allocator) !Self {
         const locals = ArrayList(Local).init(allocator);
-        // Append empty local to tell vm that variables 
-        // start after this point
-        // try locals.append(Local {
-        //     .name = "",
-        //     .depth =  0,
-        //     .initialized = false,
-        // });
         return Self {
             .fn_type = fn_type,
             .function = try Function.default(allocator),

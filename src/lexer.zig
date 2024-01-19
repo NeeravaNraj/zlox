@@ -20,6 +20,7 @@ pub const Lexer = struct {
         UnterminatedString,
         ParseNumerical,
         AllocationError,
+        UnterminatedComment,
     };
 
     const Self = @This();
@@ -61,7 +62,7 @@ pub const Lexer = struct {
     }
 
     fn read_token(self: *Self) LexerError!Token {
-        self.whitespace();
+        try self.whitespace();
 
         self.start = self.curr;
         self.span.start = self.span.end;
@@ -140,7 +141,7 @@ pub const Lexer = struct {
         return token;
     }
 
-    fn whitespace(self: *Self) void {
+    fn whitespace(self: *Self) LexerError!void {
         while (true) {
             if (self.peek()) |char| {
                 switch (char) {
@@ -151,10 +152,55 @@ pub const Lexer = struct {
                         self.span.end = 0;
                     },
                     ' ', '\r', '\t' => _ = self.bump(),
+                    '/' => {
+                        const next = self.peek_next();
+                        if (next) |ch| {
+                            switch (ch) {
+                                '/' => {
+                                    while (!self.is_match('\n') and !self.is_at_end()) {
+                                        _ = self.bump();
+                                    }
+                                },
+                                '*' => try self.block_comment(),
+                                else => break,
+                            }
+                        } else break;
+                    },
                     else => break,
                 }
             } else break;
         }
+    }
+
+    fn block_comment(self: *Self) LexerError!void {
+        _ = self.bump();
+        _ = self.bump();
+        const line = self.span.line;
+        while (!self.is_at_end()) {
+            switch (self.peek().?) {
+                '/' => {
+                    if (self.peek_next()) |star| {
+                        if (star == '*') try self.block_comment();
+                    }
+                },
+                '*' => {
+                    _ = self.bump();
+                    if (self.is_match('/')) return;
+                },
+                '\n' => {
+                    self.span.line += 1;
+                    _ = self.bump();
+                },
+                else => _ = self.bump(),
+            }
+        }
+        var span = self.span;
+        span.line = line;
+        span.end = span.start + 2;
+        self.error_occurred = true;
+        Logger.interpreter_error(&span, "comment block was not terminated") 
+        catch return LexerError.UnterminatedComment;
+        return LexerError.UnterminatedComment;
     }
 
     fn numerical(self: *Self) LexerError!Token {
@@ -315,6 +361,11 @@ pub const Lexer = struct {
     inline fn peek(self: *Self) ?u8 {
         if (self.is_at_end()) return null;
         return self.source[self.curr];
+    }
+
+    inline fn peek_next(self: *Self) ?u8 {
+        if (self.is_at_end()) return null;
+        return self.source[self.curr + 1];
     }
 
     inline fn make_literal(self: *Self, kind: TokenKind, literal: Object) Token {
