@@ -48,7 +48,13 @@ pub const Lexer = struct {
         var list = ArrayList(Token).init(self.allocator);
 
         while (!self.is_at_end()) {
-            const token = self.read_token() catch continue;
+            const token = self.read_token() catch |err| {
+                if (
+                    err == LexerError.UnterminatedComment or 
+                    err == LexerError.UnterminatedString
+                ) return err;
+                continue;
+            };
 
             try list.append(token);
         }
@@ -157,7 +163,7 @@ pub const Lexer = struct {
                         if (next) |ch| {
                             switch (ch) {
                                 '/' => {
-                                    while (!self.is_match('\n') and !self.is_at_end()) {
+                                    while (!self.check('\n') and !self.is_at_end()) {
                                         _ = self.bump();
                                     }
                                 },
@@ -366,6 +372,11 @@ pub const Lexer = struct {
     inline fn peek_next(self: *Self) ?u8 {
         if (self.is_at_end()) return null;
         return self.source[self.curr + 1];
+    }
+
+    inline fn check(self: *Self, expected: u8) bool {
+        if (self.is_at_end()) return false;
+        return self.source[self.curr + 1] == expected;
     }
 
     inline fn make_literal(self: *Self, kind: TokenKind, literal: Object) Token {
