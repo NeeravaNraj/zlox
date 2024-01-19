@@ -157,7 +157,7 @@ pub const Vm = struct {
         const frame = CallFrame {
             .function = function,
             .ip = 0,
-            .slot_start = self.stack_top() - count - 1,
+            .slot_start = self.stack_top() - count,
         };
 
         self.frames.append(frame) catch return InterpreterError.AllocationError;
@@ -351,19 +351,24 @@ pub const Vm = struct {
     }
 
     fn error_at(self: *Self, comptime msg: []const u8, args: anytype) InterpreterError {
-        var frame = self.get_current_frame();
-        if (frame.function.chunk.get_line(frame.ip)) |line| {
-            if (self.get_source(line)) |span| {
-                self.log_error(&span, msg, args);
-                return InterpreterError.Interpreter;
+        var names = ArrayList([]const u8).init(self.allocator);
+        var spans = ArrayList(Span).init(self.allocator);
+        for (self.frames.items, 0..) |frame, i| {
+            names.append(frame.function.name) catch return InterpreterError.AllocationError;
+            if (@constCast(&frame.function.chunk).get_line(frame.ip - 1)) |line| {
+                if (self.get_source(line, i)) |span| {
+                    spans.append(span) catch return InterpreterError.AllocationError;
+                }
             }
         }
-        self.log_error_simple(msg, args);
+
+        Logger.interpreter_traceback_call(spans.items, names.items, msg, args) catch 
+        return InterpreterError.AllocationError;
         return InterpreterError.Interpreter;
     }
 
-    fn get_source(self: *Self, line: usize) ?Span {
-        const frame = self.get_current_frame();
+    fn get_source(self: *Self, line: usize, index: usize) ?Span {
+        const frame = self.frames.items[index];
         for (frame.function.source_map.items) |span| {
             if (span.line == line) return span;
         }

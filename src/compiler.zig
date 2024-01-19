@@ -41,14 +41,14 @@ const Compiler = struct {
     locals: ArrayList(Local),
 
     pub fn init(fn_type: FunctionType, enclosing: ?*Self, allocator: Allocator) !Self {
-        var locals = ArrayList(Local).init(allocator);
+        const locals = ArrayList(Local).init(allocator);
         // Append empty local to tell vm that variables 
         // start after this point
-        try locals.append(Local {
-            .name = "",
-            .depth =  0,
-            .initialized = false,
-        });
+        // try locals.append(Local {
+        //     .name = "",
+        //     .depth =  0,
+        //     .initialized = false,
+        // });
         return Self {
             .fn_type = fn_type,
             .function = try Function.default(allocator),
@@ -97,7 +97,8 @@ pub const Parser = struct {
     }
 
     pub fn compile(self: *Self, source: []const u8) ParserError!Function {
-        const compiler = Compiler.init(FunctionType.Script, null, self.allocator) catch return ParserError.Allocation;
+        var compiler = Compiler.init(FunctionType.Script, null, self.allocator) catch return ParserError.Allocation;
+        compiler.function.name = "script";
         self.compiler = @constCast(&compiler);
         var lexer = Lexer.init(source, self.options, self.allocator);
         self.tokens = lexer.tokenize() catch return ParserError.Lexer;
@@ -107,13 +108,7 @@ pub const Parser = struct {
         }
         self.emit_byte(Opcodes.Return);
 
-        if (self.options.args & @intFromEnum(Option.DebugOpcodes) != 0) {
-            var disasm = Disasm.init();
-            disasm.disassemble_chunk(
-                self.current_function().name, 
-                self.current_chunk()
-            ) catch return ParserError.Disassembler;
-        }
+        try self.log_code();
 
         if (self.error_occurred) return ParserError.Error;
         return self.compiler.function;
@@ -200,6 +195,7 @@ pub const Parser = struct {
             return;
         }
         self.block();
+        self.log_code() catch return;
         const function = self.end_compiler();
 
         self.end_scope();
@@ -408,10 +404,10 @@ pub const Parser = struct {
                     if (self.is_match(TokenKind.RightParen)) break;
                     continue;
                 }
-                self.consume(TokenKind.RightParen, "expected ')' after function arguments");
                 break;
             }
         }
+        self.consume(TokenKind.RightParen, "expected ')' after function arguments");
 
         return arg_count;
     }
@@ -619,6 +615,16 @@ pub const Parser = struct {
 
     fn locals(self: *Self) *ArrayList(Local) {
         return &self.compiler.locals;
+    }
+
+    fn log_code(self: *Self) ParserError!void {
+        if (self.options.args & @intFromEnum(Option.DebugOpcodes) != 0) {
+            var disasm = Disasm.init();
+            disasm.disassemble_chunk(
+                self.current_function().name, 
+                self.current_chunk()
+            ) catch return ParserError.Disassembler;
+        }
     }
 
     fn log_error(self: *Self, span: *Span, comptime fmt: []const u8, args: anytype) void {
