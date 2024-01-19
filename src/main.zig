@@ -29,7 +29,7 @@ pub fn main() !void {
             std.process.exit(1);
         };
 
-        var vm = Vm.init(options, allocator);
+        var vm = try Vm.init(options, allocator);
         try vm.interpret(contents);
 
     } else {

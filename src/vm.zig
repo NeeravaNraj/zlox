@@ -9,6 +9,8 @@ const Parser = @import("compiler.zig").Parser;
 const Disassembler = @import("disassembler.zig").Disassembler;
 const Function = @import("function.zig").Function;
 const logger = @import("logger.zig");
+const Native = @import("native.zig").Native;
+const std_ = @import("std.zig");
 const Logger = logger.Logger;
 const Level = logger.Level;
 const Span = tokens.Span;
@@ -44,10 +46,12 @@ pub const Vm = struct {
     disassembler: Disassembler,
     allocator: Allocator,
 
-    pub fn init(options: Options, allocator: Allocator) Self {
+    pub fn init(options: Options, allocator: Allocator) !Self {
+        var globals = HashMap(Object).init(allocator);
+        try globals.put("clock", Object.native("clock", std_.clock));
         return Self {
             .stack = ArrayList(Object).init(allocator),
-            .globals = HashMap(Object).init(allocator),
+            .globals = globals,
             .frames = ArrayList(CallFrame).init(allocator),
             .source_map = undefined,
             .options = options,
@@ -150,6 +154,12 @@ pub const Vm = struct {
 
         switch (callee) {
             Object.Fn => |func| try self.call(func, count),
+            Object.Native => |native| {
+                const result = native.function(self.stack.items[self.stack_top() - count..]);
+                self.stack.resize(self.stack_top() - count) catch 
+                return InterpreterError.AllocationError;
+                try self.push(result);
+            },
             else => return self.error_at("can only call objects", .{}),
         }
     }
@@ -310,6 +320,12 @@ pub const Vm = struct {
         };
 
         try self.push(value);
+    }
+
+    fn define_native(self: *Self, name: []const u8, function: Native.NativeFn) InterpreterError!void {
+        self.globals.put(name, Object{ 
+            .Native = Native.init(name, function) 
+        }) catch return InterpreterError;
     }
 
     fn log_trace(self: *Self) InterpreterError!void {

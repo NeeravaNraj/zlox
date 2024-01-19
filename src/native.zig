@@ -3,7 +3,7 @@ const Object = @import("object.zig").Object;
 
 pub const Native = struct {
     const Self = @This();
-    const NativeFn = *const fn(len: usize, args: []const Object) Object;
+    pub const NativeFn = *const fn(args: []const Object) Object;
     name: []const u8,
     function: NativeFn,
 

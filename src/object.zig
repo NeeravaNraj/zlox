@@ -2,6 +2,7 @@ const std = @import("std");
 const String = @import("string.zig").String;
 const Function = @import("function.zig").Function;
 const Native = @import("native.zig").Native;
+const Allocator = std.mem.Allocator;
 
 pub const Object = union(enum) {
     const Self = @This();
@@ -205,6 +206,26 @@ pub const Object = union(enum) {
     }
 
     pub fn is_fn(self: Self) bool {
-        return single(self) == single(.Fn);
+        return switch (single(self)) {
+            single(.Fn) => true,
+            single(.Native) => true,
+            else => false,
+        };
+    }
+
+    pub fn string(init_str: []const u8, allocator: Allocator) !Self {
+        return Object{ .Str = String.init(init_str, allocator)};
+    }
+
+    pub fn float(init: f64) Self {
+        return Object{ .Float = init };
+    }
+
+    pub fn int(init: i32) !Self {
+        return Object{ .Int = init };
+    }
+
+    pub fn native(name: []const u8, function: Native.NativeFn) Self {
+        return Object { .Native = Native.init(name, function) };
     }
 };
