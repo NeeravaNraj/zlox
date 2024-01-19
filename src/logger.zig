@@ -93,6 +93,17 @@ pub const Logger = struct {
 
             // source code line
             // pointers
+            var padding = try String.init(" ", allocator);
+            var pointers = try String.init("^", allocator);
+            try padding.repeat(span.start);
+            try pointers.repeat(span.end - span.start);
+            try std.fmt.format(writer, "\x1B[1m\x1B[38;5;012m{s:<3}| {s}{s}{s}\n\n", .{
+                " ",
+                Level.Error.get_level_color(),
+                padding.as_slice(),
+                pointers.as_slice(),
+            });
+            try std.fmt.format(writer, "\x1B[0m", .{}); // reset
         }
     }
 

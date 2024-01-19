@@ -83,7 +83,14 @@ pub const Vm = struct {
                 try self.log_trace();
             const instruction: Opcodes = @enumFromInt(chunk.code.items[frame.ip]);
             switch (instruction) {
-                Opcodes.Return => return,
+                Opcodes.Return => {
+                    const value = self.pop();
+                    const f = self.frames.pop(); // TODO: deinit
+                    if (self.frame_len() == 0) return;
+                    self.stack.resize(f.slot_start - 1) catch 
+                    return InterpreterError.AllocationError;
+                    try self.push(value);
+                },
                 Opcodes.Print => {
                     const value = self.pop();
                     std.debug.print("{}\n", .{value});
@@ -307,13 +314,11 @@ pub const Vm = struct {
 
     fn log_trace(self: *Self) InterpreterError!void {
         var frame = self.get_current_frame();
-        std.debug.print("stack trace: [", .{});
-        for (self.stack.items, frame.slot_start..) |slot, i| {
-            std.debug.print("{}", .{slot});
-            if (self.stack.items.len > i)
-                std.debug.print(", ", .{});
+        std.debug.print("stack trace: ", .{});
+        for (self.stack.items) |slot| {
+            std.debug.print("[ {} ]", .{slot});
         }
-        std.debug.print("]\n", .{});
+        std.debug.print("\n", .{});
 
         _ = self
             .disassembler

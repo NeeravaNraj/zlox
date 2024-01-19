@@ -106,7 +106,7 @@ pub const Parser = struct {
         while (!self.is_match(TokenKind.Eof)) {
             self.statement();
         }
-        self.emit_byte(Opcodes.Return);
+        self.emit_return();
 
         try self.log_code();
 
@@ -115,7 +115,7 @@ pub const Parser = struct {
     }
 
     fn end_compiler(self: *Self) Function {
-        self.emit_byte(Opcodes.Return);
+        self.emit_return();
 
         const function = self.compiler.function;
         if (self.compiler.enclosing) |compiler|
@@ -133,6 +133,7 @@ pub const Parser = struct {
                 self.block();
                 self.end_scope();
             },
+            TokenKind.Return => self.return_statement(),
             TokenKind.Fn => self.function_statement(),
             else => self.expression_statement(),
         }
@@ -200,6 +201,23 @@ pub const Parser = struct {
 
         self.end_scope();
         self.emit_constant(Object{ .Fn = function });
+    }
+
+    fn return_statement(self: *Self) void {
+        if (self.compiler.fn_type == FunctionType.Script) {
+            self.log_error(
+                @constCast(&self.current().span),
+                "return at top level is not allowed", .{}
+            );
+        }
+        self.advance();
+        if (self.is_match(TokenKind.SemiColon)) {
+            self.emit_return();
+        } else {
+            self.expression();
+            self.consume(TokenKind.SemiColon, "expected ';' afer return value");
+            self.emit_byte(Opcodes.Return);
+        }
     }
 
     fn block(self: *Self,) void {
@@ -401,7 +419,7 @@ pub const Parser = struct {
                 arg_count += 1;
                 if (self.check(TokenKind.Comma)) {
                     self.advance();
-                    if (self.is_match(TokenKind.RightParen)) break;
+                    if (self.check(TokenKind.RightParen)) break;
                     continue;
                 }
                 break;
@@ -547,6 +565,12 @@ pub const Parser = struct {
     fn emit_constant(self: *Self, constant: Object) void {
         // TODO: handle error
         self.current_chunk().write_constant(constant, self.previous().span.line) catch return;
+    }
+
+    fn emit_return(self: *Self) void {
+        // TODO: handle error
+        self.current_chunk().write(Opcodes.None, self.previous().span.line) catch return;
+        self.current_chunk().write(Opcodes.Return, self.previous().span.line) catch return;
     }
 
     fn advance(self: *Self) void {
