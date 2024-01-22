@@ -120,7 +120,6 @@ pub const Parser = struct {
 
     fn statement(self: *Self) void {
         switch (self.current().kind) {
-            TokenKind.Print => self.print_statement(),
             TokenKind.Let => self.let_statement(),
             TokenKind.Return => self.return_statement(),
             TokenKind.Fn => self.function_statement(),
@@ -366,13 +365,6 @@ pub const Parser = struct {
         self.locals().items[self.locals().items.len - 1].initialized = true;
     }
 
-    fn print_statement(self: *Self) void {
-        self.advance();
-        self.expression();
-        self.consume(TokenKind.SemiColon, "expected ';' after expresion");
-        self.emit_byte(Opcodes.Print);
-    }
-
     fn expression_statement(self: *Self) void {
         self.expression();
         self.consume(TokenKind.SemiColon, "expected ';' after expresion");
@@ -390,7 +382,6 @@ pub const Parser = struct {
                 TokenKind.For,
                 TokenKind.While,
                 TokenKind.If,
-                TokenKind.Print,
                 TokenKind.Return => return,
                 else => {},
             }

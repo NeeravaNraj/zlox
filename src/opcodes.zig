@@ -29,7 +29,6 @@ pub const Opcodes = enum(u8) {
     Less,
     LessEquals,
     Ternary,
-    Print,
     Pop,
 
     pub fn to_string(self: Self) []const u8 {
@@ -61,7 +60,6 @@ pub const Opcodes = enum(u8) {
             Self.Less => "OP_LESS",
             Self.LessEquals => "OP_LESS_EQUAL",
             Self.Ternary => "OP_TERNARY",
-            Self.Print => "OP_PRINT",
             Self.Pop => "OP_POP",
         };
 

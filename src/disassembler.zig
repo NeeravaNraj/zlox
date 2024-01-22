@@ -56,7 +56,6 @@ pub const Disassembler = struct {
             Opcodes.NotEquals,
             Opcodes.Equals,
             Opcodes.Ternary,
-            Opcodes.Print,
             Opcodes.Pop,
             Opcodes.None,
             Opcodes.Return => return try self.simple_instruction(instruction, offset),

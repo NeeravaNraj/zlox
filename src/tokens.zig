@@ -67,7 +67,6 @@ pub const TokenKind = enum {
     Lm,
     Break,
     Continue,
-    Print,
     Eof,
 };
 

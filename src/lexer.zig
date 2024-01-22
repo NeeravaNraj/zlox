@@ -335,7 +335,6 @@ pub const Lexer = struct {
         try keywords.put("in", TokenKind.In);
         try keywords.put("break", TokenKind.Break);
         try keywords.put("continue", TokenKind.Continue);
-        try keywords.put("print", TokenKind.Print);
         try keywords.put("return", TokenKind.Return);
         return keywords.get(value);
     }

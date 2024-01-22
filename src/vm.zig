@@ -49,6 +49,7 @@ pub const Vm = struct {
     pub fn init(options: Options, allocator: Allocator) !Self {
         var globals = HashMap(Object).init(allocator);
         try globals.put("clock", Object.native("clock", std_.clock));
+        try globals.put("print", Object.native("print", std_.print));
         return Self {
             .stack = ArrayList(Object).init(allocator),
             .globals = globals,
@@ -94,10 +95,6 @@ pub const Vm = struct {
                     self.stack.resize(f.slot_start - 1) catch 
                     return InterpreterError.AllocationError;
                     try self.push(value);
-                },
-                Opcodes.Print => {
-                    const value = self.pop();
-                    std.debug.print("{}\n", .{value});
                 },
                 Opcodes.Constant => {
                     var change: usize = 0;
@@ -176,9 +173,10 @@ pub const Vm = struct {
             Object.Fn => |func| try self.call(func, count),
             Object.Native => |native| {
                 const result = native.function(self.stack.items[self.stack_top() - count..]);
-                self.stack.resize(self.stack_top() - count) catch 
+                self.stack.resize(self.stack_top() - count - 1) catch 
                 return InterpreterError.AllocationError;
                 try self.push(result);
+                self.get_current_frame().ip += 1;
             },
             else => return self.error_at("can only call objects", .{}),
         }
