@@ -9,7 +9,7 @@
             "request": "launch",
             "name": "Debug",
             "program": "${workspaceFolder}/zig-out/bin/zlox",
-            "args": ["fn.txt"],
+            "args": ["conditional.txt"],
             "cwd": "${workspaceFolder}"
         }
     ]

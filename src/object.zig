@@ -56,9 +56,25 @@ pub const Object = union(enum) {
             Self.Bool => |v| Self{ .Bool = !v },
             Self.Str => |v| Self{ .Bool = v.len == 0 },
             Self.None => Self{ .Bool = true },
-            Self.Fn => Self{ .Bool = false },
+            Self.Fn,
             Self.Native => Self{ .Bool = false },
         };
+    }
+
+    pub fn is_truthy(self: Self) bool {
+        return switch (self) {
+            Self.Int => |v| v != 0,
+            Self.Float => |v| v != 0,
+            Self.Bool => |v| v,
+            Self.Str => |v| v.len > 0,
+            Self.None => false,
+            Self.Fn,
+            Self.Native =>  true,
+        };
+    }
+
+    pub fn is_falsey(self: Self) bool {
+        return !self.is_truthy();
     }
 
     pub fn type_name(self: Self) []const u8{

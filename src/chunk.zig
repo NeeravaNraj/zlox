@@ -11,6 +11,7 @@ pub const Line = struct {
 };
 
 pub const Chunk = struct {
+    pub const INDEX_SIZE: usize = @bitSizeOf(usize) / 8;
     const Self = @This();
     code: ArrayList(u8),
     constants: ArrayList(Object),
@@ -49,13 +50,23 @@ pub const Chunk = struct {
         }
     }
 
+    /// encodes the given index into `Chunk.code`
     pub fn write_index(self: *Self, index: usize) !void {
-        const size: usize = @intCast(@bitSizeOf(usize) / 8);
         // encode a usize into u8's to store in the code section
-        for (0..size) |i| {
-            const shift_by: u6 = @intCast(size * i);
+        for (0..INDEX_SIZE) |i| {
+            const shift_by: u6 = @intCast(INDEX_SIZE * i);
             const byte: u8 = @intCast((index >> shift_by) & 0xFF);
             try self.code.append(byte);
+        }
+    }
+
+    /// patches the given index at `at` in `Chunk.code`
+    pub fn patch_index(self: *Self, index: usize, at: usize) !void {
+        // encode a usize into u8's to store in the code section
+        for (0..INDEX_SIZE) |i| {
+            const shift_by: u6 = @intCast(INDEX_SIZE * i);
+            const byte: u8 = @intCast((index >> shift_by) & 0xFF);
+            self.code.items[at + i] &= byte;
         }
     }
 

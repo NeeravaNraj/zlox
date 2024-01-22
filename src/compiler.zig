@@ -1,12 +1,12 @@
 const std = @import("std");
+const tokens = @import("tokens.zig");
+const logger = @import("logger.zig");
+const rulefn = @import("rule.zig");
+const arg_parser = @import("arg_parser.zig");
 const Object = @import("object.zig").Object;
 const Lexer = @import("lexer.zig").Lexer;
 const Chunk = @import("chunk.zig").Chunk;
-const tokens = @import("tokens.zig");
-const logger = @import("logger.zig");
-const arg_parser = @import("arg_parser.zig");
 const Opcodes = @import("opcodes.zig").Opcodes;
-const rulefn = @import("rule.zig");
 const String = @import("string.zig").String;
 const Disasm = @import("disassembler.zig").Disassembler;
 const Function = @import("function.zig").Function;
@@ -96,6 +96,7 @@ pub const Parser = struct {
         var lexer = Lexer.init(source, self.options, self.allocator);
         self.tokens = lexer.tokenize() catch return ParserError.Lexer;
         defer self.tokens.deinit();
+
         while (!self.is_match(TokenKind.Eof)) {
             self.statement();
         }
@@ -121,13 +122,16 @@ pub const Parser = struct {
         switch (self.current().kind) {
             TokenKind.Print => self.print_statement(),
             TokenKind.Let => self.let_statement(),
+            TokenKind.Return => self.return_statement(),
+            TokenKind.Fn => self.function_statement(),
+            TokenKind.If => self.if_statement(),
+            TokenKind.While => self.while_statement(),
             TokenKind.LeftBrace => {
+                self.advance();
                 self.begin_scope();
                 self.block();
                 self.end_scope();
             },
-            TokenKind.Return => self.return_statement(),
-            TokenKind.Fn => self.function_statement(),
             else => self.expression_statement(),
         }
 
@@ -181,13 +185,7 @@ pub const Parser = struct {
             }
         }
         self.consume(TokenKind.RightParen, "expected ')' after parameters");
-        if (!self.check(TokenKind.LeftBrace)) {
-            self.log_error(
-                @constCast(&self.current().span), 
-                "expected '{{' before function body", .{}
-            );
-            return;
-        }
+        self.consume(TokenKind.LeftBrace, "expected '{' before function body");
         self.block();
         self.log_code() catch return;
         const function = self.end_compiler();
@@ -213,11 +211,71 @@ pub const Parser = struct {
         }
     }
 
-    fn block(self: *Self,) void {
+    fn while_statement(self: *Self) void {
+        const loop_start = self.current_chunk().code_len();
         self.advance();
+        self.expression();
+
+        const exit_jump = self.emit_jump(Opcodes.JumpFalse);
+        self.emit_byte(Opcodes.Pop);
+        if (!self.conditional_block()) return;
+        self.patch_jump(exit_jump);
+
+        self.emit_loop(loop_start);
+        self.emit_byte(Opcodes.Pop);
+    }
+
+    fn if_statement(self: *Self) void {
+        self.advance();
+
+        self.expression();
+        const jmp_false = self.emit_jump(Opcodes.JumpFalse);
+        self.emit_byte(Opcodes.Pop);
+
+        if (!self.conditional_block()) return;
+
+        var else_jumps = ArrayList(usize).init(self.allocator);
+        else_jumps.append(self.emit_jump(Opcodes.Jump)) catch return;
+        self.patch_jump(jmp_false);
+        self.emit_byte(Opcodes.Pop);
+        
+        while (self.is_match(TokenKind.ElseIf)) {
+            self.expression();
+            const jf = self.emit_jump(Opcodes.JumpFalse);
+            self.emit_byte(Opcodes.Pop);
+
+            if (!self.conditional_block()) return;
+
+            else_jumps.append(self.emit_jump(Opcodes.Jump)) catch return;
+            self.patch_jump(jf);
+            self.emit_byte(Opcodes.Pop);
+        }
+
+        if (self.is_match(TokenKind.Else)) if (self.conditional_block()) return;
+
+        for (else_jumps.items) |jump| {
+            self.patch_jump(jump);
+        }
+        else_jumps.deinit();
+    }
+
+    fn conditional_block(self: *Self) bool {
+        if (self.is_match(TokenKind.Colon)) {
+            self.statement();
+        } else if (self.is_match(TokenKind.LeftBrace)) {
+            self.block();
+        } else {
+            self.log_error(&self.current().span, "expected '{{' before conditional block or ':' before statement", .{});
+            return false;
+        }
+
+        return true;
+    }
+
+    fn block(self: *Self,) void {
         while (!self.check(TokenKind.RightBrace) and !self.check(TokenKind.Eof))
             self.statement();
-        self.consume(TokenKind.RightBrace, "expected '}}' after block");
+        self.consume(TokenKind.RightBrace, "expected '}' after block");
     }
 
     fn let_statement(self: *Self) void {
@@ -354,8 +412,8 @@ pub const Parser = struct {
             // infix
             RuleFn.Binary => self.binary(),
             // RuleFn.Ternary => self.ternary(),
-            // RuleFn.And => self.and(),
-            // RuleFn.Or => self.or(),
+            RuleFn.And => self.and_(),
+            RuleFn.Or => self.or_(),
             else => unreachable,
         }
     }
@@ -506,6 +564,25 @@ pub const Parser = struct {
         }
     }
 
+    fn and_(self: *Self) void {
+        const end_jump = self.emit_jump(Opcodes.JumpFalse);
+
+        self.emit_byte(Opcodes.Pop);
+        self.parse_precedence(Precedence.Logical);
+        self.patch_jump(end_jump);
+    }
+
+    fn or_(self: *Self) void {
+        const else_jump = self.emit_jump(Opcodes.JumpFalse);
+        const jump = self.emit_jump(Opcodes.Jump);
+
+        self.patch_jump(else_jump);
+        self.emit_byte(Opcodes.Pop);
+
+        self.parse_precedence(Precedence.Logical);
+        self.patch_jump(jump);
+    }
+
     fn binary(self: *Self) void {
         const op = self.previous().kind;
         const rule = self.get_rule(op);
@@ -564,6 +641,26 @@ pub const Parser = struct {
         // TODO: handle error
         self.current_chunk().write(Opcodes.None, self.previous().span.line) catch return;
         self.current_chunk().write(Opcodes.Return, self.previous().span.line) catch return;
+    }
+
+    fn emit_jump(self: *Self, instruction: Opcodes) usize {
+        self.emit_byte(instruction);
+        self.current_chunk().write_index(std.math.maxInt(usize)) 
+        catch return std.math.maxInt(usize);
+        return self.current_chunk().code_len() - Chunk.INDEX_SIZE;
+    }
+
+    fn patch_jump(self: *Self, at: usize) void {
+        const jump = self.current_chunk().code_len() - at - Chunk.INDEX_SIZE;
+        self.current_chunk().patch_index(jump, at)
+        catch return;
+    }
+
+    fn emit_loop(self: *Self, start: usize) void {
+        self.emit_byte(Opcodes.Loop);
+
+        const offset = self.current_chunk().code_len() - start + Chunk.INDEX_SIZE - 1;
+        self.current_chunk().write_index(offset) catch return;
     }
 
     fn advance(self: *Self) void {

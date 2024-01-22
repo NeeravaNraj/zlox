@@ -33,6 +33,6 @@ pub fn main() !void {
         try vm.interpret(contents);
 
     } else {
-        std.debug.print("repl\n", .{});
+        std.debug.print("todo repl\n", .{});
     }
 }

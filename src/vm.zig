@@ -81,11 +81,11 @@ pub const Vm = struct {
 
     fn run(self: *Self) InterpreterError!void {
         while (true) {
-            const frame = self.get_current_frame();
-            const chunk = &frame.function.chunk;
             if (self.options.args & @intFromEnum(Option.DebugTrace) != 0) 
                 try self.log_trace();
-            const instruction: Opcodes = @enumFromInt(chunk.code.items[frame.ip]);
+            const instruction: Opcodes = @enumFromInt(
+                self.get_current_chunk().code.items[self.get_current_frame().ip]
+            );
             switch (instruction) {
                 Opcodes.Return => {
                     const value = self.pop();
@@ -101,10 +101,12 @@ pub const Vm = struct {
                 },
                 Opcodes.Constant => {
                     var change: usize = 0;
-                    const value = chunk.read_constant(frame.ip, &change);
+                    const value = self.get_current_chunk().read_constant(
+                        self.get_current_frame().ip, &change
+                    );
                     try self.push(value);
                     // jump over the value region
-                    frame.ip += change - 1;
+                    self.get_current_frame().ip += change - 1;
                 },
                 Opcodes.Negate => {
                     const value = self.pop().negate() catch {
@@ -137,14 +139,32 @@ pub const Vm = struct {
                 Opcodes.GetLocal => try self.get_local(),
                 Opcodes.SetLocal => try self.set_local(),
 
+                Opcodes.JumpFalse => {
+                    const offset = self.read_index();
+                    if (self.peek(0).is_falsey()) 
+                        self.get_current_frame().ip += offset;
+                },
+
+                Opcodes.Jump => {
+                    const offset = self.read_index();
+                    self.get_current_frame().ip += offset;
+                },
+
+                Opcodes.Loop => {
+                    const offset = self.read_index();
+                    self.get_current_frame().ip -= offset;
+                    continue;
+                },
+
                 Opcodes.Call => {
                     const arg_count = self.read_byte();
                     try self.call_value(self.peek(arg_count), arg_count);
+                    continue;
                 },
 
                 else => return InterpreterError.Interpreter
             }
-            frame.ip += 1;
+            self.get_current_frame().ip += 1;
         }
     }
 
