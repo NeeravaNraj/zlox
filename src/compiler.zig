@@ -22,6 +22,44 @@ const Allocator = std.mem.Allocator;
 const Options = arg_parser.Options;
 const Option = arg_parser.Option;
 
+const LoopLoc = struct {
+    const Self = @This();
+    depth: u16,
+    location: usize,
+
+    pub fn init(depth: u16, location: usize) Self {
+        return Self {
+            .depth = depth,
+            .location = location,
+        };
+    }
+};
+
+const LoopData = struct {
+    const Self = @This();
+    inside_loop: bool,
+    depth: u16,
+    starts: ArrayList(LoopLoc),
+    breaks: ArrayList(LoopLoc),
+
+    pub fn default(allocator: Allocator) Self {
+        return Self {
+            .inside_loop = false,
+            .depth = 0,
+            .starts = ArrayList(LoopLoc).init(allocator),
+            .breaks = ArrayList(LoopLoc).init(allocator),
+        };
+    }
+
+    fn add_break(self: *Self, jump: usize) !void {
+        try self.breaks.append(LoopLoc.init(self.depth, jump));
+    }
+
+    fn add_start(self: *Self, start: usize) !void {
+        try self.starts.append(LoopLoc.init(self.depth, start));
+    }
+};
+
 pub const FunctionType = enum {
     Script,
     Fn
@@ -39,6 +77,7 @@ const Compiler = struct {
     fn_type: FunctionType,
     enclosing: ?*Self,
     locals: ArrayList(Local),
+    loop_data: LoopData,
 
     pub fn init(fn_type: FunctionType, enclosing: ?*Self, allocator: Allocator) !Self {
         const locals = ArrayList(Local).init(allocator);
@@ -47,6 +86,7 @@ const Compiler = struct {
             .function = try Function.default(allocator),
             .enclosing = enclosing,
             .locals = locals,
+            .loop_data = LoopData.default(allocator),
         };
     }
 
@@ -125,6 +165,7 @@ pub const Parser = struct {
             TokenKind.Fn => self.function_statement(),
             TokenKind.If => self.if_statement(),
             TokenKind.While => self.while_statement(),
+            TokenKind.Break => self.break_statement(),
             TokenKind.LeftBrace => {
                 self.advance();
                 self.begin_scope();
@@ -210,18 +251,57 @@ pub const Parser = struct {
         }
     }
 
+    fn break_statement(self: *Self) void {
+        self.advance();
+        if (!self.compiler.loop_data.inside_loop) {
+            self.log_error(
+                &self.previous().span, 
+                "'break' outside loop", .{}
+            );
+            return;
+        }
+
+        self.consume(TokenKind.SemiColon, "expected ';' after break");
+
+        const exit_jump = self.emit_jump(Opcodes.Jump);
+        self.compiler.loop_data.add_break(exit_jump) catch return;
+    }
+
     fn while_statement(self: *Self) void {
         const loop_start = self.current_chunk().code_len();
         self.advance();
         self.expression();
 
         const exit_jump = self.emit_jump(Opcodes.JumpFalse);
+        self.setup_loop(exit_jump);
         self.emit_byte(Opcodes.Pop);
         if (!self.conditional_block()) return;
-        self.patch_jump(exit_jump);
-
         self.emit_loop(loop_start);
+
+        self.patch_jump(exit_jump);
+        self.resolve_breaks(self.compiler.loop_data.depth);
         self.emit_byte(Opcodes.Pop);
+        self.end_loop();
+    }
+
+    fn setup_loop(self: *Self, start: usize) void {
+        self.compiler.loop_data.inside_loop = true;
+        self.compiler.loop_data.depth += 1;
+        self.compiler.loop_data.add_start(start) catch return;
+    }
+
+    fn end_loop(self: *Self) void {
+        self.compiler.loop_data.depth -= 1;
+        if (self.compiler.loop_data.depth == 0) 
+            self.compiler.loop_data.inside_loop = false;
+    }
+
+    fn resolve_breaks(self: *Self, loop_depth: u16) void {
+        for (self.compiler.loop_data.breaks.items) |loc| {
+            if (loc.depth == loop_depth) 
+                self.patch_jump(loc.location);
+        }
+
     }
 
     fn if_statement(self: *Self) void {
@@ -272,8 +352,9 @@ pub const Parser = struct {
     }
 
     fn block(self: *Self,) void {
-        while (!self.check(TokenKind.RightBrace) and !self.check(TokenKind.Eof))
+        while (!self.check(TokenKind.RightBrace) and !self.check(TokenKind.Eof)) {
             self.statement();
+        }
         self.consume(TokenKind.RightBrace, "expected '}' after block");
     }
 

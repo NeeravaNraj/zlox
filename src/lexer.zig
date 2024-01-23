@@ -73,6 +73,7 @@ pub const Lexer = struct {
         self.start = self.curr;
         self.span.start = self.span.end;
 
+        if (self.is_at_end()) return LexerError.AbruptEof;
         const char = self.bump();
         const token: LexerError!Token = switch (char) {
             '(' => self.make_token(TokenKind.LeftParen),
@@ -163,7 +164,11 @@ pub const Lexer = struct {
                         if (next) |ch| {
                             switch (ch) {
                                 '/' => {
-                                    while (!self.check('\n') and !self.is_at_end()) {
+                                    while (!self.is_at_end()) {
+                                        if (self.check('\n')) {
+                                            _ = self.bump();
+                                            break;
+                                        }
                                         _ = self.bump();
                                     }
                                 },
