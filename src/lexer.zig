@@ -190,6 +190,7 @@ pub const Lexer = struct {
         while (!self.is_at_end()) {
             switch (self.peek().?) {
                 '/' => {
+                    _ = self.bump();
                     if (self.peek_next()) |star| {
                         if (star == '*') try self.block_comment();
                     }
